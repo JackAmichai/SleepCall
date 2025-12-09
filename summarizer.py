@@ -55,7 +55,8 @@ class Summarizer:
                 from openai import OpenAI
                 self.client = OpenAI(api_key=self.openai_api_key)
         except Exception as e:
-            print(f"Warning: Failed to initialize OpenAI client: {e}")
+            # Avoid printing the full exception which might contain the API key
+            print(f"Warning: Failed to initialize OpenAI client: {type(e).__name__}")
             self.client = None
     
     def summarize(
@@ -114,9 +115,9 @@ class Summarizer:
             return summary if summary else "Unable to generate summary from transcript."
             
         except Exception as e:
-            error_msg = f"Summary generation failed: {str(e)}"
-            print(f"Error in summarize: {error_msg}")
-            return f"(Summary unavailable: {error_msg})"
+            # We log the type of error but avoid printing the full message which might contain keys
+            print(f"Error in summarize: {type(e).__name__}")
+            return f"(Summary unavailable: {type(e).__name__})"
     
     def __repr__(self) -> str:
         provider = "Azure OpenAI" if self.use_azure else "OpenAI"

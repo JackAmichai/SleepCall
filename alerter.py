@@ -95,7 +95,7 @@ class Alerter:
                 print(f"✗ Teams webhook failed: {response.status_code}")
                 return False
         except Exception as e:
-            print(f"✗ Teams webhook error: {e}")
+            print(f"✗ Teams webhook error: {type(e).__name__}")
             return False
     
     def _send_slack(self, title: str, body: str) -> bool:
@@ -119,7 +119,7 @@ class Alerter:
                 print(f"✗ Slack webhook failed: {response.status_code}")
                 return False
         except Exception as e:
-            print(f"✗ Slack webhook error: {e}")
+            print(f"✗ Slack webhook error: {type(e).__name__}")
             return False
     
     def _send_desktop(self, title: str, message: str) -> bool:
