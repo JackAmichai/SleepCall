@@ -4,20 +4,18 @@ Real-time meeting transcription with name detection and instant alerts
 """
 import time
 import sys
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import azure.cognitiveservices.speech as speechsdk
 
 from config import config
-from transcript_buffer import RollingTranscript
-from name_detector import NameDetector
-from summarizer import Summarizer
-from alerter import Alerter
+from meeting_processor import MeetingProcessor
+from alerter import Alerter # Still needed for direct testing
 
 
 class MeetingSentinel:
     """
-    Main application class that orchestrates real-time transcription,
-    name detection, summarization, and alerting
+    Main application class that orchestrates real-time transcription
+    and delegates processing to MeetingProcessor.
     """
     
     def __init__(self):
@@ -34,91 +32,43 @@ class MeetingSentinel:
         # Print configuration
         config.print_config()
         
-        # Initialize components
-        self.buffer = RollingTranscript(max_minutes=config.ROLLING_BUFFER_MINUTES)
-        self.detector = NameDetector(
-            target_names=config.TARGET_NAMES,
-            fuzz_threshold=config.FUZZ_THRESHOLD
-        )
-        self.summarizer = Summarizer()
-        self.alerter = Alerter()
-        
-        # Trigger cooldown tracking
-        self.last_trigger_time = datetime.min.replace(tzinfo=timezone.utc)
+        # Initialize processor
+        self.processor = MeetingProcessor()
         
         # Speech recognizer
         self.recognizer = None
         
         print("\n✓ Meeting Sentinel initialized successfully\n")
     
-    def _should_trigger_alert(self) -> bool:
-        """Check if enough time has passed since last trigger"""
-        now = datetime.now(timezone.utc)
-        elapsed = (now - self.last_trigger_time).total_seconds()
-        return elapsed >= config.TRIGGER_COOLDOWN_SECONDS
-    
-    def _handle_name_detected(self, text: str):
-        """Handle name detection event"""
-        if not self._should_trigger_alert():
-            print(f"⏳ Cooldown active, skipping trigger (last alert was {int((datetime.now(timezone.utc) - self.last_trigger_time).total_seconds())}s ago)")
-            return
-        
-        # Update last trigger time
-        self.last_trigger_time = datetime.now(timezone.utc)
-        
-        # Get mentioned names
-        mentioned = self.detector.find_mentioned_names(text)
-        print(f"\n🎯 Name detected: {', '.join(mentioned)}")
-        print(f"📝 In text: \"{text}\"")
-        
-        # Get recent transcript
-        recent_text = self.buffer.last_minutes_text(config.SUMMARY_WINDOW_MINUTES)
-        
-        if not recent_text:
-            print("⚠️  No recent transcript available for summary")
-            return
-        
-        # Generate summary
-        print(f"🤖 Generating summary of last {config.SUMMARY_WINDOW_MINUTES} minutes...")
-        summary = self.summarizer.summarize(recent_text, mentioned)
-        
-        # Send alert
-        print("📢 Sending alert...")
-        self.alerter.send_alert(summary)
-        
-        print(f"✓ Alert sent! Next alert available in {config.TRIGGER_COOLDOWN_SECONDS}s\n")
-    
     def _on_recognizing(self, evt: speechsdk.SpeechRecognitionEventArgs):
         """Handle intermediate recognition results (optional)"""
-        # These are partial/interim results - can be noisy
-        # Uncomment to see live transcription progress:
-        # if evt.result.text:
-        #     print(f"Recognizing: {evt.result.text}")
         pass
     
     def _on_recognized(self, evt: speechsdk.SpeechRecognitionEventArgs):
         """Handle final recognition results"""
         if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
             text = evt.result.text
-            if not text:
-                return
-            
-            # Timestamp (approximate - based on current time)
             timestamp = datetime.now(timezone.utc)
-            speaker = "Speaker"  # Without diarization, we don't know who
-            
-            # Add to buffer
-            self.buffer.add(speaker, text, timestamp)
+            speaker = "Speaker"
             
             # Log transcript
             print(f"[{timestamp.strftime('%H:%M:%S')}] {speaker}: {text}")
             
-            # Check for name detection
-            if self.detector.is_name_mentioned(text):
-                self._handle_name_detected(text)
+            # Process text using the processor
+            result = self.processor.process_text(text, speaker)
+
+            if result.get("alert_sent"):
+                print(f"\n🎯 Name detected in: \"{text}\"")
+                print("📢 Alert sent!")
+                print(f"✓ Next alert available in {config.TRIGGER_COOLDOWN_SECONDS}s\n")
+            elif result.get("text") and self.processor.detector.is_name_mentioned(result.get("text")):
+                 # Name detected but cooldown active
+                 # We need to access internal state to know if it was cooldown or empty buffer
+                 # But for CLI output we can infer or add logging in processor
+                 # For now, let's just leave it simple.
+                 pass
         
         elif evt.result.reason == speechsdk.ResultReason.NoMatch:
-            # No speech recognized in this segment
             pass
     
     def _on_canceled(self, evt: speechsdk.SpeechRecognitionCanceledEventArgs):
@@ -145,15 +95,6 @@ class MeetingSentinel:
                 region=config.AZURE_SPEECH_REGION
             )
             
-            # Optional: Tune for better latency
-            # speech_config.set_property(
-            #     speechsdk.PropertyId.Speech_SegmentationSilenceTimeoutMs,
-            #     "300"
-            # )
-            
-            # Audio configuration - using default microphone
-            # To capture system audio, use a loopback device:
-            # audio_config = speechsdk.audio.AudioConfig(device_name="DEVICE_ID")
             audio_config = speechsdk.audio.AudioConfig(use_default_microphone=True)
             
             # Create recognizer
@@ -194,7 +135,9 @@ class MeetingSentinel:
     def test_alerts(self):
         """Test alert functionality"""
         print("🧪 Testing alert system...\n")
-        results = self.alerter.test_alert()
+        # We can access alerter through processor or create new one
+        # Using processor's alerter ensures consistency
+        results = self.processor.alerter.test_alert()
         
         success_count = sum(1 for v in results.values() if v)
         total_count = len([k for k, v in results.items() if v is not None])

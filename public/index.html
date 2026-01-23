@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Sentinel - Web Demo</title>
+    <style>
+        body { font-family: sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; }
+        #transcript { height: 300px; border: 1px solid #ccc; overflow-y: scroll; padding: 10px; margin-bottom: 20px; background: #f9f9f9; }
+        #alerts { border: 1px solid #ffcccc; background: #fff0f0; padding: 10px; min-height: 50px; }
+        .alert-item { margin-bottom: 10px; padding: 10px; background: white; border-left: 5px solid red; }
+        button { padding: 10px 20px; font-size: 1.2em; cursor: pointer; }
+        .controls { margin-bottom: 20px; }
+        .status { color: #666; font-size: 0.9em; }
+    </style>
+</head>
+<body>
+    <h1>Meeting Sentinel 🎯</h1>
+    <p>Web Demo: Uses browser speech recognition to detect your name and trigger alerts.</p>
+
+    <div class="controls">
+        <button id="startBtn">Start Listening</button>
+        <button id="stopBtn" disabled>Stop</button>
+        <span id="status" class="status">Ready</span>
+    </div>
+
+    <h3>Transcript</h3>
+    <div id="transcript"></div>
+
+    <h3>Alerts</h3>
+    <div id="alerts"></div>
+
+    <script>
+        const startBtn = document.getElementById('startBtn');
+        const stopBtn = document.getElementById('stopBtn');
+        const statusEl = document.getElementById('status');
+        const transcriptEl = document.getElementById('transcript');
+        const alertsEl = document.getElementById('alerts');
+
+        let recognition;
+
+        if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+            recognition.continuous = true;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                statusEl.textContent = "Listening...";
+                startBtn.disabled = true;
+                stopBtn.disabled = false;
+            };
+
+            recognition.onend = () => {
+                statusEl.textContent = "Stopped (or paused)";
+                startBtn.disabled = false;
+                stopBtn.disabled = true;
+            };
+
+            recognition.onresult = async (event) => {
+                const lastResult = event.results[event.results.length - 1];
+                if (lastResult.isFinal) {
+                    const text = lastResult[0].transcript.trim();
+                    const p = document.createElement('p');
+                    p.textContent = `[${new Date().toLocaleTimeString()}] ${text}`;
+                    transcriptEl.appendChild(p);
+                    transcriptEl.scrollTop = transcriptEl.scrollHeight;
+
+                    // Send to API
+                    try {
+                        const response = await fetch('/api/process', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ text: text, speaker: "User" })
+                        });
+                        const result = await response.json();
+
+                        if (result.alert_sent) {
+                            const alertDiv = document.createElement('div');
+                            alertDiv.className = 'alert-item';
+                            alertDiv.innerHTML = `<strong>Alert!</strong><br>${result.summary}`;
+                            alertsEl.prepend(alertDiv);
+                        }
+                    } catch (e) {
+                        console.error("API Error:", e);
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error("Speech error:", event.error);
+                statusEl.textContent = "Error: " + event.error;
+            };
+        } else {
+            alert("Web Speech API not supported in this browser. Try Chrome.");
+            startBtn.disabled = true;
+        }
+
+        startBtn.onclick = () => {
+            recognition.start();
+        };
+
+        stopBtn.onclick = () => {
+            recognition.stop();
+        };
+    </script>
+</body>
+</html>
